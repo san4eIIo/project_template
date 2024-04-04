@@ -11,6 +11,8 @@ from sqlalchemy import (
     String,
     Float,
     DateTime,
+    delete,
+    update,
 )
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import select
@@ -127,8 +129,30 @@ async def send_data_to_subscribers(user_id: int, data):
 @app.post("/processed_agent_data/")
 async def create_processed_agent_data(data: List[ProcessedAgentData]):
     # Insert data to database
+    values_list = []
+    with SessionLocal() as db:
+        for item in data:
+            try:   
+                values_dict = {
+                    "road_state": item.road_state,
+                    "user_id": item.agent_data.user_id,
+                    "x": item.agent_data.accelerometer.x,
+                    "y": item.agent_data.accelerometer.y,
+                    "z": item.agent_data.accelerometer.z,
+                    "latitude": item.agent_data.gps.latitude,
+                    "longitude": item.agent_data.gps.longitude,
+                    "timestamp": item.agent_data.timestamp.isoformat()
+                }
+                insert_operation = processed_agent_data.insert().values(values_dict)
+                db.execute(insert_operation)
+                db.commit()
+                values_list.append(values_dict)
+            except Exception as e:
+                db.rollback()
+                raise e
     # Send data to subscribers
-    pass
+    if (len(values_list) > 0):
+        await send_data_to_subscribers(data[0].agent_data.user_id, data)
 
 
 @app.get(
@@ -137,13 +161,23 @@ async def create_processed_agent_data(data: List[ProcessedAgentData]):
 )
 def read_processed_agent_data(processed_agent_data_id: int):
     # Get data by id
-    pass
+    with SessionLocal() as db:
+        select_operation = select(processed_agent_data).where(processed_agent_data.c.id == processed_agent_data_id)
+        result = db.execute(select_operation).fetchone()
+        if result is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        return ProcessedAgentDataInDB(**result._asdict())
 
 
 @app.get("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
 def list_processed_agent_data():
     # Get list of data
-    pass
+    with SessionLocal() as db:
+        select_operation = select(processed_agent_data)
+        result = db.execute(select_operation).fetchall()
+        if result is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        return [ProcessedAgentDataInDB(**row._asdict()) for row in result]
 
 
 @app.put(
@@ -152,8 +186,29 @@ def list_processed_agent_data():
 )
 def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAgentData):
     # Update data
-    pass
-
+    with SessionLocal() as db:
+        select_operation = select(processed_agent_data).where(processed_agent_data.c.id == processed_agent_data_id)
+        result = db.execute(select_operation).fetchone()
+        if result is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        values_dict = {
+            "road_state": data.road_state,
+            "user_id": data.agent_data.user_id,
+            "x": data.agent_data.accelerometer.x,
+            "y": data.agent_data.accelerometer.y,
+            "z": data.agent_data.accelerometer.z,
+            "latitude": data.agent_data.gps.latitude,
+            "longitude": data.agent_data.gps.longitude,
+            "timestamp": data.agent_data.timestamp.isoformat()
+        }
+        update_operation = update(processed_agent_data).where(processed_agent_data.c.id == processed_agent_data_id).values(values_dict)
+        db.execute(update_operation)
+        db.commit()
+        select_operation = select(processed_agent_data).where(processed_agent_data.c.id == processed_agent_data_id)
+        result = db.execute(select_operation).fetchone()
+        if result is None:
+            raise HTTPException(status_code=404, detail="ERROR: NOT FOUND")
+        return ProcessedAgentDataInDB(**result._asdict())
 
 @app.delete(
     "/processed_agent_data/{processed_agent_data_id}",
@@ -161,8 +216,15 @@ def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAge
 )
 def delete_processed_agent_data(processed_agent_data_id: int):
     # Delete by id
-    pass
-
+    with SessionLocal() as db:
+        select_operation = select(processed_agent_data).where(processed_agent_data.c.id == processed_agent_data_id)
+        result = db.execute(select_operation).fetchone()
+        if result is None:
+            raise HTTPException(status_code=404, detail="ERROR: NOT FOUND")
+        delete_operation = delete(processed_agent_data).where(processed_agent_data.c.id == processed_agent_data_id)
+        db.execute(delete_operation)
+        db.commit()
+        return ProcessedAgentDataInDB(**result._asdict())
 
 if __name__ == "__main__":
     import uvicorn
